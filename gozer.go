@@ -37,7 +37,7 @@ var sitemapXSL []byte
 
 type Site struct {
 	pages []Page
-	posts []Page
+	posts []*Page
 
 	Title   string `toml:"title"`
 	SiteUrl string `toml:"url"`
@@ -46,25 +46,35 @@ type Site struct {
 
 type Page struct {
 	// Title of this page
-	Title         string
+	Title string
 
 	// Template this page uses for rendering. Defaults to "default.html".
-	Template      string
+	Template string
 
 	// Time this page was published (parsed from file name).
 	DatePublished time.Time
 
 	// Time this page was last modified (from filesystem).
-	DateModified  time.Time
+	DateModified time.Time
 
 	// The full URL to this page (incl. site URL)
-	Permalink     string
+	Permalink string
 
 	// URL path for this page, relative to site URL
-	UrlPath       string
+	UrlPath string
 
 	// Path to source file for this page, relative to content root
-	Filepath      string
+	Filepath string
+
+	// URL path for the thumbnail for this page
+	Thumbnail string
+
+	// The Next Page in the list of posts. Note: this may not be
+	// meaningful when looking at pages generally.
+	NextPage *Page
+
+	// Long form description for metadata
+	Description string
 }
 
 // parseFilename parses the URL path and optional date component from the given file path
@@ -170,17 +180,18 @@ func (s *Site) buildPage(p *Page) error {
 	}
 
 	return tmpl.Execute(fh, map[string]any{
-		"Page":    p,
-		"Posts":   s.posts,
-		"Pages":   s.pages,
+		"Page":  p,
+		"Posts": s.posts,
+		"Pages": s.pages,
 		"Site": map[string]string{
-			"Url": s.SiteUrl,
+			"Url":   s.SiteUrl,
 			"Title": s.Title,
 		},
 
 		// Shorthand for accessing through .Page.Title / .Page.Content
-		"Title":   p.Title,
-		"Content": template.HTML(content),
+		"Title":    p.Title,
+		"Content":  template.HTML(content),
+		"NextPage": p.NextPage,
 
 		// Deprecated template variables, use .Site.Url instead
 		"SiteUrl": s.SiteUrl,
@@ -212,7 +223,7 @@ func (s *Site) AddPageFromFile(file string) error {
 
 	// every page with a date is assumed to be a blog post
 	if !p.DatePublished.IsZero() {
-		s.posts = append(s.posts, p)
+		s.posts = append(s.posts, &s.pages[len(s.pages)-1])
 	}
 
 	return nil
@@ -231,6 +242,12 @@ func (s *Site) readContent(dir string) error {
 	sort.Slice(s.posts, func(i int, j int) bool {
 		return s.posts[i].DatePublished.After(s.posts[j].DatePublished)
 	})
+
+	// populate NextPage
+	for i := 1; i < len(s.posts); i++ {
+		s.posts[i].NextPage = s.posts[i-1]
+		log.Info(fmt.Sprintf("%s next -> %s", s.posts[i].Title, s.posts[i].NextPage.Title))
+	}
 
 	return err
 }
@@ -277,7 +294,9 @@ func (s *Site) createSitemap() error {
 	if _, err := wr.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>`)); err != nil {
 		return err
 	}
-	if err := xml.NewEncoder(wr).Encode(env); err != nil {
+	enc := xml.NewEncoder(wr)
+	env.Indent("", "  ")
+	if err := enc.Encode(env); err != nil {
 		return err
 	}
 
@@ -344,7 +363,7 @@ func (s *Site) createRSSFeed() error {
 		Channel: Channel{
 			Title:         s.Title,
 			Link:          s.SiteUrl,
-            Generator:     "Gozer",
+			Generator:     "Gozer",
 			LastBuildDate: time.Now().Format(time.RFC1123Z),
 			Items:         items,
 		},
@@ -361,7 +380,9 @@ func (s *Site) createRSSFeed() error {
 		return err
 	}
 
-	if err := xml.NewEncoder(wr).Encode(feed); err != nil {
+	enc := xml.NewEncoder(wr)
+	enc.Indent("", "  ")
+	if err := enc.Encode(feed); err != nil {
 		return err
 	}
 
@@ -393,15 +414,15 @@ func parseConfig(s *Site, file string) error {
 func main() {
 	configFile := "config.toml"
 	rootPath := ""
-    showHelp := false
+	showHelp := false
 
 	// parse flags
 	flag.StringVar(&configFile, "config", configFile, "")
 	flag.StringVar(&configFile, "c", configFile, "")
 	flag.StringVar(&rootPath, "root", rootPath, "")
 	flag.StringVar(&rootPath, "r", rootPath, "")
-    flag.BoolVar(&showHelp, "help", showHelp, "")
-    flag.BoolVar(&showHelp, "h", showHelp, "")
+	flag.BoolVar(&showHelp, "help", showHelp, "")
+	flag.BoolVar(&showHelp, "h", showHelp, "")
 	flag.Parse()
 
 	command := os.Args[len(os.Args)-1]
