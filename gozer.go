@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -229,10 +230,15 @@ func (s *Site) AddPageFromFile(file string) error {
 	return nil
 }
 
+var mdOrHtml *regexp.Regexp = regexp.MustCompile(".((md)|(html))$")
+
 func (s *Site) readContent(dir string) error {
 	// walk over files in "content" directory
 	err := filepath.WalkDir(dir, func(file string, d fs.DirEntry, err error) error {
 		if d.IsDir() {
+			return nil
+		}
+		if !mdOrHtml.Match([]byte(file)) {
 			return nil
 		}
 		return s.AddPageFromFile(file)
@@ -295,7 +301,7 @@ func (s *Site) createSitemap() error {
 		return err
 	}
 	enc := xml.NewEncoder(wr)
-	env.Indent("", "  ")
+	enc.Indent("", "  ")
 	if err := enc.Encode(env); err != nil {
 		return err
 	}
